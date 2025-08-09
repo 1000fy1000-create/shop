@@ -10,29 +10,35 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
     const rows = body.rows as Record<string, any>[]
-    if (!Array.isArray(rows)) return NextResponse.json({ error: 'Invalid rows' }, { status: 400 })
+    if (!Array.isArray(rows)) {
+      return NextResponse.json({ error: 'Invalid rows' }, { status: 400 })
+    }
 
     const sheetId = process.env.NEXT_PUBLIC_SHEET_ID!
-    const sheets = google.sheets({ version: 'v4' })
+    if (!sheetId) {
+      return NextResponse.json({ error: 'Missing NEXT_PUBLIC_SHEET_ID' }, { status: 500 })
+    }
+
     const auth = new google.auth.JWT({
       email: process.env.GOOGLE_CLIENT_EMAIL,
       key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     })
     await auth.authorize()
+    const sheets = google.sheets({ version: 'v4', auth })
 
-    // Determine headers from keys union (ordered by appearance)
+    // Заголовки — объединение всех ключей
     const headerSet = new Set<string>()
     rows.forEach(r => Object.keys(r).forEach(k => headerSet.add(k)))
     const headers = Array.from(headerSet)
 
-    // Prepare values (2D array): first row headers, then rows
-    const values = [headers, *[rows.map(r => headers.map(h => r[h] ?? ''))][0]]
-    // Using Sheet1 by default; adjust if needed
+    // ✅ Правильная сборка 2D-массива значений
+    const values = [headers, ...rows.map(r => headers.map(h => r[h] ?? ''))]
+
+    // Пишем в Sheet1 c A1
     const range = 'Sheet1!A1:Z'
-    await sheets.spreadsheets.values.clear({ auth, spreadsheetId: sheetId, range })
+    await sheets.spreadsheets.values.clear({ spreadsheetId: sheetId, range })
     await sheets.spreadsheets.values.update({
-      auth,
       spreadsheetId: sheetId,
       range,
       valueInputOption: 'RAW',
@@ -41,6 +47,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, headers, count: rows.length })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return NextResponse.json({ error: e.message || 'Unknown error' }, { status: 500 })
   }
 }
